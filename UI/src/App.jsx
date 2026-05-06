@@ -164,6 +164,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentPage, setCurrentPage] = useState('chat');
   const [rightPanelContent, setRightPanelContent] = useState('empty');
+  const [rightPanelLinks, setRightPanelLinks] = useState([]);
   const [selectedModel, setSelectedModel] = useState('8b');
 
   const [conversations, setConversations] = useState([]);
@@ -458,6 +459,7 @@ export default function App() {
     setCurrentConversationId(null);
     setMessages([]);
     setRightPanelContent('empty');
+    setRightPanelLinks([]);
     setCurrentPage('chat');
   };
 
@@ -493,6 +495,8 @@ export default function App() {
     setMessages([]);
     setCurrentPage('chat');
     setLoadingMessages(true);
+    setRightPanelContent('empty');
+    setRightPanelLinks([]);
 
     try {
       const msgs = await fetchMessages({ conversationId, limit: 30 });
@@ -504,7 +508,7 @@ export default function App() {
       }));
       setMessages(mapped);
       setHasMoreMessages(msgs.length === 30);
-      if (mapped.length > 0) setRightPanelContent('links');
+      if (mapped.length > 0) setRightPanelContent('empty');
     } catch (err) {
       console.error('Failed to load messages:', err.message);
     } finally {
@@ -570,7 +574,8 @@ export default function App() {
 
     setInput('');
     setIsTyping(true);
-    setRightPanelContent('links');
+    setRightPanelContent('empty');
+    setRightPanelLinks([]);
 
     try {
       let convoId = currentConversationId;
@@ -702,7 +707,7 @@ export default function App() {
         retrieveMemoryContext(convoId).catch(() => ''),
       ]);
       let fullResponse = '';
-      const validatorMeta = await sendMessage({
+      const assistantMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
@@ -722,8 +727,16 @@ export default function App() {
         },
       });
 
+      const sources = assistantMeta?.sources || [];
+      setRightPanelLinks(sources);
+      setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
+
       // Persist assistant message
-      const assistantRow = await insertMessage({ conversationId: convoId, role: 'assistant', content: fullResponse });
+      const assistantRow = await insertMessage({
+        conversationId: convoId,
+        role: 'assistant',
+        content: fullResponse,
+      });
 
       // Fire-and-forget: feedback log + memory extraction
       insertFeedbackLog({
@@ -731,9 +744,9 @@ export default function App() {
         userId:           user.id,
         conversationId:   convoId,
         behaviorSnapshot: manualBehavior,
-        validatorsRun:    validatorMeta?.validatorsRun    ?? [],
-        validatorsPassed: validatorMeta?.validatorsPassed ?? true,
-        repairsApplied:   validatorMeta?.repairsApplied   ?? [],
+        validatorsRun:    assistantMeta?.validatorsRun    ?? [],
+        validatorsPassed: assistantMeta?.validatorsPassed ?? true,
+        repairsApplied:   assistantMeta?.repairsApplied   ?? [],
         modelUsed:        selectedModel,
       }).catch(() => {});
 
@@ -829,7 +842,7 @@ export default function App() {
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
       let fullResponse = '';
-      const validatorMeta = await sendMessage({
+      const assistantMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
@@ -845,16 +858,24 @@ export default function App() {
         },
       });
 
-      const assistantRow = await insertMessage({ conversationId: currentConversationId, role: 'assistant', content: fullResponse });
+      const sources = assistantMeta?.sources || [];
+      setRightPanelLinks(sources);
+      setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
+
+      const assistantRow = await insertMessage({
+        conversationId: currentConversationId,
+        role: 'assistant',
+        content: fullResponse,
+      });
 
       insertFeedbackLog({
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   currentConversationId,
         behaviorSnapshot: manualBehavior,
-        validatorsRun:    validatorMeta?.validatorsRun    ?? [],
-        validatorsPassed: validatorMeta?.validatorsPassed ?? true,
-        repairsApplied:   validatorMeta?.repairsApplied   ?? [],
+        validatorsRun:    assistantMeta?.validatorsRun    ?? [],
+        validatorsPassed: assistantMeta?.validatorsPassed ?? true,
+        repairsApplied:   assistantMeta?.repairsApplied   ?? [],
         modelUsed:        selectedModel,
       }).catch(() => {});
 
@@ -928,7 +949,7 @@ export default function App() {
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
       let fullResponse = '';
-      const validatorMeta = await sendMessage({
+      const assistantMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
@@ -944,16 +965,24 @@ export default function App() {
         },
       });
 
-      const assistantRow = await insertMessage({ conversationId: currentConversationId, role: 'assistant', content: fullResponse });
+      const sources = assistantMeta?.sources || [];
+      setRightPanelLinks(sources);
+      setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
+
+      const assistantRow = await insertMessage({
+        conversationId: currentConversationId,
+        role: 'assistant',
+        content: fullResponse,
+      });
 
       insertFeedbackLog({
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   currentConversationId,
         behaviorSnapshot: manualBehavior,
-        validatorsRun:    validatorMeta?.validatorsRun    ?? [],
-        validatorsPassed: validatorMeta?.validatorsPassed ?? true,
-        repairsApplied:   validatorMeta?.repairsApplied   ?? [],
+        validatorsRun:    assistantMeta?.validatorsRun    ?? [],
+        validatorsPassed: assistantMeta?.validatorsPassed ?? true,
+        repairsApplied:   assistantMeta?.repairsApplied   ?? [],
         modelUsed:        selectedModel,
       }).catch(() => {});
 
@@ -1001,6 +1030,7 @@ export default function App() {
     setActiveProjectId(null);
     setMessages([]);
     setRightPanelContent('empty');
+    setRightPanelLinks([]);
     setCurrentPage('chat');
   };
 
@@ -1030,6 +1060,7 @@ export default function App() {
         setCurrentConversationId(null);
         setMessages([]);
         setRightPanelContent('empty');
+        setRightPanelLinks([]);
       }
     } catch (err) {
       console.error('Delete failed:', err.message);
@@ -1054,6 +1085,7 @@ export default function App() {
     setConversations([]);
     setCurrentConversationId(null);
     setRightPanelContent('empty');
+    setRightPanelLinks([]);
     setCurrentPage('chat');
     setProjects([]);
     setProjectConversations({});
@@ -1160,7 +1192,7 @@ export default function App() {
             hasConversation={!!currentConversationId}
             activeBehaviorScope={activeBehaviorScope}
           />
-          <RightPanel rightPanelContent={rightPanelContent} />
+          <RightPanel rightPanelContent={rightPanelContent} links={rightPanelLinks} />
         </>
       )}
 

@@ -67,11 +67,13 @@ def _resolve_params(behavior: dict | None) -> dict:
     }
 
 
-def _build_system_prompt(behavior: dict | None, memory_prompt: str | None) -> str:
+def _build_system_prompt(behavior: dict | None, memory_prompt: str | None, rag_prompt: str | None) -> str:
     result = compile_policy(BASE_SYSTEM_PROMPT, behavior)
     system = result["prompt"]
     if memory_prompt:
         system = memory_prompt + "\n\n" + system
+    if rag_prompt:
+        system = system + "\n\n" + rag_prompt
     return system
 
 
@@ -107,16 +109,21 @@ async def stream_chat(
     model: str = "8b",
     behavior: dict | None = None,
     memory_prompt: str | None = None,
+    rag_prompt: str | None = None,
+    sources: list[dict] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Stream chat completion from Groq. Yields SSE-formatted lines:
       data: {"token": "..."}       — for each text chunk
       data: {"done": true, ...}    — final message with validator metadata
+
+    Uses Groq for completion with behavior policy, optional memory, and optional RAG context.
     """
     api_key = _get_api_key()
     model_id = MODELS.get(model, MODELS["8b"])
     params = _resolve_params(behavior)
-    system_prompt = _build_system_prompt(behavior, memory_prompt)
+
+    system_prompt = _build_system_prompt(behavior, memory_prompt, rag_prompt)
 
     body = {
         "model": model_id,
@@ -188,12 +195,15 @@ async def stream_chat(
         elif result["action"] == "warn" and result["warning_text"]:
             full_response += result["warning_text"]
             validator_meta["repairs_applied"] = [
-                v["rule"] for v in result["violations"] if v["severity"] == "medium"
+                v["rule"] for v in result["violations"] if v.get("severity") == "medium"
             ]
             yield f"data: {json.dumps({'replace': full_response})}\n\n"
 
     # Final done event
-    yield f"data: {json.dumps({'done': True, 'full_response': full_response, **validator_meta})}\n\n"
+    done_payload = {"done": True, "full_response": full_response, **validator_meta}
+    if sources:
+        done_payload["sources"] = sources
+    yield f"data: {json.dumps(done_payload)}\n\n"
 
 
 async def generate_title(user_message: str) -> str | None:

@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from services.llm import stream_chat, generate_title
+from services.web_search import build_rag_prompt
 from services.conversation_state import (
     analyze_conversation_state,
     generate_default_behavior,
@@ -49,12 +50,21 @@ async def chat(req: ChatRequest):
     # 4. Adapt to conversation context
     behavior = adapt_behavior(behavior, state)
 
+    last_user_message = next(
+        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+        "",
+    )
+
+    rag_prompt, sources = await build_rag_prompt(last_user_message)
+
     return StreamingResponse(
         stream_chat(
             messages=messages,
             model=req.model,
             behavior=behavior,
             memory_prompt=req.memory_prompt,
+            rag_prompt=rag_prompt,
+            sources=sources,
         ),
         media_type="text/event-stream",
         headers={

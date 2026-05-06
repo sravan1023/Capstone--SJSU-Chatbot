@@ -50,6 +50,7 @@ export async function sendMessage({ messages, model = '8b', onChunk, onReplace, 
     validatorsRun: [],
     validatorsPassed: true,
     repairsApplied: [],
+    sources: [],
   };
 
   while (true) {
@@ -76,6 +77,7 @@ export async function sendMessage({ messages, model = '8b', onChunk, onReplace, 
             validatorsRun: parsed.validators_run || [],
             validatorsPassed: parsed.validators_passed ?? true,
             repairsApplied: parsed.repairs_applied || [],
+            sources: parsed.sources || [],
           };
         } else if (parsed.error) {
           throw new Error(parsed.error);

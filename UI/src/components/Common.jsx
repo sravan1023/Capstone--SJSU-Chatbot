@@ -18,12 +18,18 @@ export function FollowUpChip({ text }) {
     );
 }
 
-export function LinkItem({ label, isFirst = false }) {
+export function LinkItem({ label, href, isFirst = false }) {
+    const Wrapper = href ? 'a' : 'div';
     return (
-        <div className={`flex items-center justify-between px-4 py-3.5 bg-bg-surface hover:bg-bg-hover transition-colors cursor-pointer group ${!isFirst ? 'border-t border-border-color' : ''}`}>
-            <span className="text-sm underline text-text-primary font-medium group-hover:text-black dark:group-hover:text-white">{label}</span>
+        <Wrapper
+            {...(href ? { href, target: '_blank', rel: 'noreferrer' } : {})}
+            className={`flex items-center justify-between px-4 py-3.5 bg-bg-surface hover:bg-bg-hover transition-colors cursor-pointer group ${!isFirst ? 'border-t border-border-color' : ''}`}
+        >
+            <span className="text-sm underline text-text-primary font-medium group-hover:text-black dark:group-hover:text-white">
+                {label}
+            </span>
             <LinkIcon size={14} className="text-sjsu-gold group-hover:text-black dark:group-hover:text-white" />
-        </div>
+        </Wrapper>
     );
 }
 

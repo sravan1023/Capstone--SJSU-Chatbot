@@ -50,12 +50,7 @@ async def chat(req: ChatRequest):
     # 4. Adapt to conversation context
     behavior = adapt_behavior(behavior, state)
 
-    last_user_message = next(
-        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
-        "",
-    )
-
-    rag_prompt, sources = await build_rag_prompt(last_user_message)
+    rag_prompt, sources = await build_rag_prompt(messages)
 
     return StreamingResponse(
         stream_chat(

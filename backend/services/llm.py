@@ -4,9 +4,13 @@ Ported from UI/src/services/llamaService.js
 """
 import os
 import json
+import logging
+import re
 from collections.abc import AsyncGenerator
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from services.policy_compiler import compile_policy
 from services.validator import run_validators
@@ -17,6 +21,19 @@ MODELS = {
     "8b": "llama-3.3-70b-versatile",
     "70b": "llama-3.3-70b-versatile",
 }
+
+FAST_MODEL = "llama-3.1-8b-instant"
+
+QUERY_REWRITE_SYSTEM_PROMPT = (
+    "You rewrite student questions into a single concise web search query (5-15 words) "
+    "that finds authoritative pages on sjsu.edu and related SJSU resources. "
+    "Rules: add 'SJSU' if missing; expand acronyms in context "
+    "(CPT -> curricular practical training, OPT -> optional practical training, "
+    "F-1, I-20, FAFSA, GE, etc.); use SJSU office names where they help "
+    "(Global Office for international students, Registrar for registration/transcripts, "
+    "Cashier/Bursar for payments, Advising for course planning, Financial Aid). "
+    "Do NOT answer the question. Output ONLY the search query, no quotes, no preamble."
+)
 
 BASE_SYSTEM_PROMPT = (
     "You are SJSU Copilot, a helpful AI assistant for San Jose State University students. "
@@ -146,7 +163,10 @@ async def stream_chat(
         ) as res:
             if res.status_code != 200:
                 error_body = await res.aread()
-                yield f"data: {json.dumps({'error': f'Groq API error ({res.status_code}): {error_body.decode()}'})}\n\n"
+                logger.error(
+                    "Groq API error %s: %s", res.status_code, error_body.decode(errors="replace")
+                )
+                yield f"data: {json.dumps({'error': f'Upstream model error ({res.status_code})'})}\n\n"
                 return
 
             buffer = ""
@@ -199,11 +219,66 @@ async def stream_chat(
             ]
             yield f"data: {json.dumps({'replace': full_response})}\n\n"
 
+    if sources and full_response and not re.search(r"\[\d+\]", full_response):
+        logger.warning("RAG sources provided but no [N] citations found in response")
+
     # Final done event
     done_payload = {"done": True, "full_response": full_response, **validator_meta}
     if sources:
         done_payload["sources"] = sources
     yield f"data: {json.dumps(done_payload)}\n\n"
+
+
+async def rewrite_query_for_sjsu(question: str) -> str:
+    """Rewrite a user question into an SJSU-anchored web search query.
+
+    Falls back to the original question on any failure (no key, timeout, parse error,
+    empty response). The caller should always use the returned string as the search query.
+    """
+    original = (question or "").strip()
+    if not original:
+        return original
+    try:
+        api_key = _get_api_key()
+    except ValueError:
+        return original
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            res = await client.post(
+                GROQ_API_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                },
+                json={
+                    "model": FAST_MODEL,
+                    "messages": [
+                        {"role": "system", "content": QUERY_REWRITE_SYSTEM_PROMPT},
+                        {"role": "user", "content": original},
+                    ],
+                    "stream": False,
+                    "temperature": 0.2,
+                    "max_tokens": 60,
+                },
+            )
+            if res.status_code != 200:
+                logger.warning("query rewrite returned %s; falling back", res.status_code)
+                return original
+            data = res.json()
+            rewritten = (
+                (data.get("choices") or [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+                .strip('"')
+                .strip("'")
+            )
+            if not rewritten or len(rewritten) > 300:
+                return original
+            return rewritten
+    except Exception:
+        logger.exception("query rewrite failed; falling back to original")
+        return original
 
 
 async def generate_title(user_message: str) -> str | None:

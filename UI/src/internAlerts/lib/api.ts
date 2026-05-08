@@ -12,35 +12,19 @@ export interface PipelineTriggerResult {
   nextTopUrl: string | null;
 }
 
-function getFunctionUrl(functionName: string): string {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-  const ref = new URL(supabaseUrl).host.split('.')[0];
-  return `https://${ref}.functions.supabase.co/${functionName}`;
-}
+const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || 'http://localhost:8000';
 
 export async function triggerInternJobsPipeline(): Promise<PipelineTriggerResult> {
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-  const triggerToken = import.meta.env.VITE_PIPELINE_TRIGGER_TOKEN as string | undefined;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    apikey: anonKey,
-    Authorization: `Bearer ${anonKey}`,
-  };
-
-  if (triggerToken) {
-    headers['x-pipeline-token'] = triggerToken;
-  }
-
-  const response = await fetch(getFunctionUrl('intern-jobs-alert'), {
+  const response = await fetch(`${API_BASE}/api/intern-jobs/run`, {
     method: 'POST',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
   });
 
   const body = await response.json().catch(() => ({}));
 
   if (!response.ok || body?.ok === false) {
-    throw new Error(body?.error ?? body?.message ?? `Pipeline trigger failed (${response.status}).`);
+    throw new Error(body?.detail ?? body?.error ?? body?.message ?? `Pipeline trigger failed (${response.status}).`);
   }
 
   return body.result as PipelineTriggerResult;

@@ -186,7 +186,6 @@ export default function Sidebar({
                 id={c.id}
                 title={c.title}
                 preview={c.last_message_preview}
-                updatedAt={c.updated_at}
                 active={c.id === currentConversationId}
                 onClick={onSelectConversation}
                 onRename={onRenameConversation}

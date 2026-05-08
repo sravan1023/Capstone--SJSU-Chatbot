@@ -9,8 +9,7 @@ import Signup from './components/Signup';
 import VerifyEmail from './components/VerifyEmail';
 import { supabase } from './supabaseClient';
 import { ensureProfile } from './supabaseHelpers';
-import { runDueJobFetchCycle } from './services/jobFetcher';
-import { sendMessage, generateTitle } from './services/llamaService';
+import { sendMessage, generateTitle, fetchAutoBehavior } from './services/llamaService';
 import {
   fetchConversations,
   createConversation,
@@ -25,7 +24,6 @@ import {
 import { fetchBehaviorSettings, updateBehaviorSettings, resolveEffectiveBehavior, upsertScopedBehavior, deleteScopedBehavior, DEFAULT_BEHAVIOR } from './services/behaviorService';
 import ScopedBehaviorPanel from './components/ScopedBehaviorPanel';
 import { insertFeedbackLog, updateFeedbackVote } from './services/feedbackLogService';
-import { analyzeConversationState, adaptBehavior } from './services/conversationStateService';
 import {
   fetchProjects,
   createProject,
@@ -166,6 +164,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentPage, setCurrentPage] = useState('chat');
   const [rightPanelContent, setRightPanelContent] = useState('empty');
+  const [rightPanelLinks, setRightPanelLinks] = useState([]);
   const [selectedModel, setSelectedModel] = useState('8b');
 
   const [conversations, setConversations] = useState([]);
@@ -196,6 +195,7 @@ export default function App() {
   });
   const [scopedBehavior, setScopedBehavior] = useState(null);        // the override row (null = no override)
   const [activeBehaviorScope, setActiveBehaviorScope] = useState('user'); // 'user' | 'project' | 'conversation'
+  const [autoBehavior, setAutoBehavior] = useState(null);            // auto-detected behavior from backend
 
   useEffect(() => {
     if (isDarkMode) {
@@ -214,11 +214,12 @@ export default function App() {
     const schedulerMs = Number(import.meta.env.VITE_JOB_FETCHER_SCHEDULER_MS || 300000);
     let running = false;
 
+    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
     const runCycle = async () => {
       if (running) return;
       running = true;
       try {
-        await runDueJobFetchCycle({ userId: user.id });
+        await fetch(`${API_BASE}/api/jobs/fetch`, { method: 'POST' });
       } catch (error) {
         console.error('Job scheduler cycle failed:', error?.message || error);
       } finally {
@@ -276,8 +277,8 @@ export default function App() {
     fetchBehaviorSettings(user.id)
       .then(setBehaviorSettings)
       .catch(err => {
-        console.warn('Failed to load behavior settings, using defaults:', err.message);
-        setBehaviorSettings({ ...DEFAULT_BEHAVIOR });
+        console.warn('Failed to load behavior settings, using empty overrides:', err.message);
+        setBehaviorSettings({});
       });
   }, [user?.id]);
 
@@ -342,6 +343,17 @@ export default function App() {
     }
 
     setScopedPanel({ open: true, scope, scopeId, scopeLabel });
+
+    // Fetch auto-detected behavior for this conversation's context
+    const context = messages.slice(-20).map(m => ({
+      role: m.sender === 'user' ? 'user' : 'assistant',
+      content: m.text,
+    }));
+    if (context.length > 0) {
+      fetchAutoBehavior(context).then(result => {
+        if (result?.behavior) setAutoBehavior(result.behavior);
+      }).catch(() => {});
+    }
   };
 
   const handleSaveScopedBehavior = async (updates) => {
@@ -447,6 +459,7 @@ export default function App() {
     setCurrentConversationId(null);
     setMessages([]);
     setRightPanelContent('empty');
+    setRightPanelLinks([]);
     setCurrentPage('chat');
   };
 
@@ -482,6 +495,8 @@ export default function App() {
     setMessages([]);
     setCurrentPage('chat');
     setLoadingMessages(true);
+    setRightPanelContent('empty');
+    setRightPanelLinks([]);
 
     try {
       const msgs = await fetchMessages({ conversationId, limit: 30 });
@@ -493,7 +508,7 @@ export default function App() {
       }));
       setMessages(mapped);
       setHasMoreMessages(msgs.length === 30);
-      if (mapped.length > 0) setRightPanelContent('links');
+      if (mapped.length > 0) setRightPanelContent('empty');
     } catch (err) {
       console.error('Failed to load messages:', err.message);
     } finally {
@@ -559,7 +574,8 @@ export default function App() {
 
     setInput('');
     setIsTyping(true);
-    setRightPanelContent('links');
+    setRightPanelContent('empty');
+    setRightPanelLinks([]);
 
     try {
       let convoId = currentConversationId;
@@ -685,19 +701,17 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // Resolve scoped behavior (conversation > project > user > defaults)
-      const [effectiveBehavior, memoryPrompt] = await Promise.all([
-        resolveEffectiveBehavior(user.id, activeProjectId, convoId).catch(() => behaviorSettings),
+      // Resolve manual overrides + memory in parallel
+      const [manualBehavior, memoryPrompt] = await Promise.all([
+        resolveEffectiveBehavior(user.id, activeProjectId, convoId).catch(() => null),
         retrieveMemoryContext(convoId).catch(() => ''),
       ]);
-      const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
-
       let fullResponse = '';
-      const validatorMeta = await sendMessage({
+      const assistantMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
-        behavior: adaptedBehavior,
+        behavior: manualBehavior,
         memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
@@ -713,18 +727,26 @@ export default function App() {
         },
       });
 
+      const sources = assistantMeta?.sources || [];
+      setRightPanelLinks(sources);
+      setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
+
       // Persist assistant message
-      const assistantRow = await insertMessage({ conversationId: convoId, role: 'assistant', content: fullResponse });
+      const assistantRow = await insertMessage({
+        conversationId: convoId,
+        role: 'assistant',
+        content: fullResponse,
+      });
 
       // Fire-and-forget: feedback log + memory extraction
       insertFeedbackLog({
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   convoId,
-        behaviorSnapshot: adaptedBehavior,
-        validatorsRun:    validatorMeta?.validatorsRun    ?? [],
-        validatorsPassed: validatorMeta?.validatorsPassed ?? true,
-        repairsApplied:   validatorMeta?.repairsApplied   ?? [],
+        behaviorSnapshot: manualBehavior,
+        validatorsRun:    assistantMeta?.validatorsRun    ?? [],
+        validatorsPassed: assistantMeta?.validatorsPassed ?? true,
+        repairsApplied:   assistantMeta?.repairsApplied   ?? [],
         modelUsed:        selectedModel,
       }).catch(() => {});
 
@@ -790,7 +812,9 @@ export default function App() {
     ) {
       try {
         await deleteMessage(botMsg.id);
-      } catch {}
+      } catch {
+        // best-effort delete; continue regenerating even if the row is gone
+      }
     }
 
     setMessages(prev => prev.filter(m => m.id !== botMsg.id));
@@ -812,19 +836,17 @@ export default function App() {
     abortRef.current = controller;
 
     try {
-      // Resolve scoped behavior and memory in parallel
-      const [effectiveBehavior, memoryPrompt] = await Promise.all([
-        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => behaviorSettings),
+      // Resolve manual overrides + memory in parallel
+      const [manualBehavior, memoryPrompt] = await Promise.all([
+        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => null),
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
-      const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
-
       let fullResponse = '';
-      const validatorMeta = await sendMessage({
+      const assistantMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
-        behavior: adaptedBehavior,
+        behavior: manualBehavior,
         memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
@@ -836,16 +858,24 @@ export default function App() {
         },
       });
 
-      const assistantRow = await insertMessage({ conversationId: currentConversationId, role: 'assistant', content: fullResponse });
+      const sources = assistantMeta?.sources || [];
+      setRightPanelLinks(sources);
+      setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
+
+      const assistantRow = await insertMessage({
+        conversationId: currentConversationId,
+        role: 'assistant',
+        content: fullResponse,
+      });
 
       insertFeedbackLog({
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   currentConversationId,
-        behaviorSnapshot: adaptedBehavior,
-        validatorsRun:    validatorMeta?.validatorsRun    ?? [],
-        validatorsPassed: validatorMeta?.validatorsPassed ?? true,
-        repairsApplied:   validatorMeta?.repairsApplied   ?? [],
+        behaviorSnapshot: manualBehavior,
+        validatorsRun:    assistantMeta?.validatorsRun    ?? [],
+        validatorsPassed: assistantMeta?.validatorsPassed ?? true,
+        repairsApplied:   assistantMeta?.repairsApplied   ?? [],
         modelUsed:        selectedModel,
       }).catch(() => {});
 
@@ -876,7 +906,9 @@ export default function App() {
     if (originalMsg.created_at) {
       try {
         await deleteMessagesAfter(currentConversationId, originalMsg.created_at);
-      } catch {}
+      } catch {
+        // best-effort cleanup; local state is the source of truth here
+      }
     }
 
     const preceding = messages.slice(0, msgIdx);
@@ -911,19 +943,17 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // Resolve scoped behavior and memory in parallel
-      const [effectiveBehavior, memoryPrompt] = await Promise.all([
-        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => behaviorSettings),
+      // Resolve manual overrides + memory in parallel
+      const [manualBehavior, memoryPrompt] = await Promise.all([
+        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => null),
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
-      const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
-
       let fullResponse = '';
-      const validatorMeta = await sendMessage({
+      const assistantMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
-        behavior: adaptedBehavior,
+        behavior: manualBehavior,
         memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
@@ -935,16 +965,24 @@ export default function App() {
         },
       });
 
-      const assistantRow = await insertMessage({ conversationId: currentConversationId, role: 'assistant', content: fullResponse });
+      const sources = assistantMeta?.sources || [];
+      setRightPanelLinks(sources);
+      setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
+
+      const assistantRow = await insertMessage({
+        conversationId: currentConversationId,
+        role: 'assistant',
+        content: fullResponse,
+      });
 
       insertFeedbackLog({
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   currentConversationId,
-        behaviorSnapshot: adaptedBehavior,
-        validatorsRun:    validatorMeta?.validatorsRun    ?? [],
-        validatorsPassed: validatorMeta?.validatorsPassed ?? true,
-        repairsApplied:   validatorMeta?.repairsApplied   ?? [],
+        behaviorSnapshot: manualBehavior,
+        validatorsRun:    assistantMeta?.validatorsRun    ?? [],
+        validatorsPassed: assistantMeta?.validatorsPassed ?? true,
+        repairsApplied:   assistantMeta?.repairsApplied   ?? [],
         modelUsed:        selectedModel,
       }).catch(() => {});
 
@@ -992,6 +1030,7 @@ export default function App() {
     setActiveProjectId(null);
     setMessages([]);
     setRightPanelContent('empty');
+    setRightPanelLinks([]);
     setCurrentPage('chat');
   };
 
@@ -1021,6 +1060,7 @@ export default function App() {
         setCurrentConversationId(null);
         setMessages([]);
         setRightPanelContent('empty');
+        setRightPanelLinks([]);
       }
     } catch (err) {
       console.error('Delete failed:', err.message);
@@ -1045,6 +1085,7 @@ export default function App() {
     setConversations([]);
     setCurrentConversationId(null);
     setRightPanelContent('empty');
+    setRightPanelLinks([]);
     setCurrentPage('chat');
     setProjects([]);
     setProjectConversations({});
@@ -1125,6 +1166,7 @@ export default function App() {
           user={user}
           behaviorSettings={behaviorSettings}
           onUpdateBehavior={handleUpdateBehavior}
+          autoBehavior={autoBehavior}
         />
       ) : currentPage === 'intern-alerts' ? (
         <InternJobsAlertsPage onBack={() => setCurrentPage('chat')} />
@@ -1150,7 +1192,7 @@ export default function App() {
             hasConversation={!!currentConversationId}
             activeBehaviorScope={activeBehaviorScope}
           />
-          <RightPanel rightPanelContent={rightPanelContent} />
+          <RightPanel rightPanelContent={rightPanelContent} links={rightPanelLinks} />
         </>
       )}
 
@@ -1161,7 +1203,7 @@ export default function App() {
         scope={scopedPanel.scope}
         scopeLabel={scopedPanel.scopeLabel}
         scopeId={scopedPanel.scopeId}
-        globalBehavior={behaviorSettings || DEFAULT_BEHAVIOR}
+        autoBehavior={autoBehavior || { ...DEFAULT_BEHAVIOR, ...(behaviorSettings || {}) }}
         scopedBehavior={scopedBehavior}
         onSave={handleSaveScopedBehavior}
         onDelete={handleDeleteScopedBehavior}

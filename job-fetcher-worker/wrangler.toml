@@ -1,7 +1,0 @@
-name = "sjsu-job-fetcher"
-main = "src/index.ts"
-compatibility_date = "2026-04-01"
-
-[vars]
-SUPABASE_URL = ""
-SUPABASE_SERVICE_ROLE_KEY = ""

@@ -1,5 +1,7 @@
 import { supabase } from '../supabaseClient';
 
+const memoryEnabled = import.meta.env.VITE_ENABLE_MEMORY !== 'false';
+
 /**
  * Retrieve memory context for a conversation.
  * Returns a formatted prompt string to prepend to the system prompt.
@@ -8,6 +10,7 @@ import { supabase } from '../supabaseClient';
  * @returns {Promise<string>} memory prompt text (empty string if none)
  */
 export async function retrieveMemoryContext(conversationId) {
+  if (!memoryEnabled) return '';
   const { data, error } = await supabase.functions.invoke('memory/retrieve', {
     body: { conversation_id: conversationId },
   });
@@ -30,6 +33,7 @@ export async function retrieveMemoryContext(conversationId) {
  * @param {string} assistantMessage
  */
 export async function processMemoryExtraction(conversationId, messageId, userMessage, assistantMessage) {
+  if (!memoryEnabled) return;
   const { error } = await supabase.functions.invoke('memory/process', {
     body: {
       conversation_id: conversationId,

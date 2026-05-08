@@ -1,11 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ArrowLeft, Save, User2Icon, Mail, Phone, BookOpen, GraduationCap, Calendar, Hash, Brain, Sliders, ListOrdered } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import MemoryManagement from './MemoryManagement';
 import BehaviorSettings from './BehaviorSettings';
 import PrioritySettings from './PrioritySettings';
+import { DEFAULT_BEHAVIOR } from '../services/behaviorService';
 
-export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBehavior }) {
+export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBehavior, autoBehavior }) {
+  // At the global-profile scope there is no live conversation to auto-adapt to,
+  // so the "auto" baseline falls back to DEFAULT_BEHAVIOR. Manual overrides
+  // (behaviorSettings) are merged on top for display.
+  const autoBaseline = useMemo(() => autoBehavior || DEFAULT_BEHAVIOR, [autoBehavior]);
+  const manualOverrides = useMemo(() => behaviorSettings || {}, [behaviorSettings]);
+  const effectiveSettings = useMemo(
+    () => ({ ...autoBaseline, ...manualOverrides }),
+    [autoBaseline, manualOverrides]
+  );
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -179,7 +189,12 @@ export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBe
                     <h2 className="text-lg font-bold text-text-primary">Response Style</h2>
                     <p className="text-sm text-text-secondary mt-0.5">Control how SJSU Copilot writes its responses</p>
                   </div>
-                  <BehaviorSettings settings={behaviorSettings} onUpdate={onUpdateBehavior} />
+                  <BehaviorSettings
+                    settings={effectiveSettings}
+                    autoBehavior={autoBaseline}
+                    manualOverrides={manualOverrides}
+                    onUpdate={onUpdateBehavior}
+                  />
                 </>
               ) : personalSection === 'priorities' ? (
                 <>
@@ -188,7 +203,7 @@ export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBe
                     <p className="text-sm text-text-secondary mt-0.5">What Copilot optimizes for when tradeoffs appear</p>
                   </div>
                   <PrioritySettings
-                    stack={behaviorSettings?.priority_stack}
+                    stack={effectiveSettings.priority_stack}
                     onUpdate={onUpdateBehavior}
                   />
                 </>

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Send,
   ThumbsUp,
@@ -17,6 +18,7 @@ import {
   ChevronRight,
   Code2,
   Sliders,
+  Sparkles,
 } from 'lucide-react';
 import { SuggestionCard } from './Common';
 
@@ -57,9 +59,31 @@ function CodeBlock({ language, children }) {
 }
 
 // ── Markdown renderer with custom code blocks ────────────────
+function formatReferences(text) {
+  const marker = 'references';
+  const idx = text.toLowerCase().indexOf(marker);
+  if (idx === -1) return text;
+
+  const before = text.slice(0, idx);
+  const after = text.slice(idx + marker.length).replace(/^:\s*/i, '');
+  const matches = [...after.matchAll(/\[(\d+)\]\s*([\s\S]*?)(?=\s*\[\d+\]|$)/g)];
+
+  if (matches.length === 0) return text;
+
+  const items = matches.map((match) => {
+    const num = match[1];
+    const body = match[2].replace(/\s+/g, ' ').trim();
+    return `- [${num}] ${body}`;
+  });
+
+  return `${before}References\n${items.join('\n')}`.trimEnd();
+}
+
 function MarkdownContent({ text }) {
+  const formatted = formatReferences(text);
   return (
     <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
       components={{
         code({ inline, className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '');
@@ -102,46 +126,11 @@ function MarkdownContent({ text }) {
         h3({ children }) { return <h3 className="text-base font-semibold mb-1 mt-2">{children}</h3>; },
       }}
     >
-      {text}
+      {formatted}
     </ReactMarkdown>
   );
 }
 
-// ── Extract URLs from text for citations panel ───────────────
-function extractUrls(text) {
-  const urlRegex = /https?:\/\/[^\s)>\]]+/g;
-  const matches = text.match(urlRegex);
-  if (!matches) return [];
-  return [...new Set(matches)].map(url => {
-    try {
-      const host = new URL(url).hostname.replace('www.', '');
-      return { url, label: host };
-    } catch {
-      return { url, label: url };
-    }
-  });
-}
-
-// ── Citations bar under a bot message ────────────────────────
-function Citations({ urls }) {
-  if (!urls.length) return null;
-  return (
-    <div className="flex flex-wrap gap-2 mt-2">
-      {urls.map((u, i) => (
-        <a
-          key={i}
-          href={u.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 px-2.5 py-1 bg-bg-surface border border-border-color rounded-full text-[11px] text-text-secondary hover:text-sjsu-gold hover:border-sjsu-gold/40 transition-colors"
-        >
-          <ExternalLink size={10} />
-          {u.label}
-        </a>
-      ))}
-    </div>
-  );
-}
 
 // ── Main component ───────────────────────────────────────────
 export default function MainChat({
@@ -240,24 +229,34 @@ export default function MainChat({
       {/* Top Navigation */}
       <header className="flex items-center justify-between px-10 py-5 z-10 transition-colors duration-300">
         <div className="flex items-center gap-4 ml-auto">
-          {hasConversation && (
-            <button
-              onClick={onBehaviorSettings}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                activeBehaviorScope === 'conversation'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-                  : activeBehaviorScope === 'project'
-                    ? 'bg-sjsu-gold/10 border-sjsu-gold/30 text-sjsu-gold'
-                    : 'bg-bg-surface border-border-color text-text-secondary hover:text-text-primary hover:border-text-secondary/30'
-              }`}
-              title="Conversation behavior settings"
-            >
-              <Sliders size={14} />
-              <span className="hidden sm:inline">
-                {activeBehaviorScope === 'conversation' ? 'Chat Override' : activeBehaviorScope === 'project' ? 'Project Override' : 'Behavior'}
-              </span>
-            </button>
-          )}
+          {hasConversation && (() => {
+            const isConvo = activeBehaviorScope === 'conversation';
+            const isProject = activeBehaviorScope === 'project';
+            const isAuto = !isConvo && !isProject;
+            const ScopeIcon = isAuto ? Sparkles : Sliders;
+            return (
+              <button
+                onClick={onBehaviorSettings}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                  isConvo
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+                    : isProject
+                      ? 'bg-sjsu-gold/10 border-sjsu-gold/30 text-sjsu-gold'
+                      : 'bg-violet-500/5 border-violet-500/20 text-violet-400 hover:bg-violet-500/10'
+                }`}
+                title={
+                  isConvo ? 'Manual override active for this chat — click to edit'
+                  : isProject ? 'Manual override active for this project — click to edit'
+                  : 'Auto-adapted to your conversation — click to override'
+                }
+              >
+                <ScopeIcon size={14} />
+                <span className="hidden sm:inline">
+                  {isConvo ? 'Chat Override' : isProject ? 'Project Override' : 'Auto'}
+                </span>
+              </button>
+            );
+          })()}
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
@@ -328,7 +327,7 @@ export default function MainChat({
                             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(); }
                             if (e.key === 'Escape') cancelEditing();
                           }}
-                          className="w-full bg-transparent text-text-primary px-3 py-2 focus:outline-none resize-none min-h-[60px]"
+                          className="w-full bg-transparent text-text-primary px-3 py-2 focus:outline-none resize-none min-h-15"
                           autoFocus
                         />
                         <div className="flex justify-end gap-2 pt-1 pr-1">
@@ -390,9 +389,6 @@ export default function MainChat({
                         <span className="inline-block w-2 h-4 bg-sjsu-gold/80 rounded-sm animate-pulse ml-0.5 align-middle" />
                       )}
                     </div>
-
-                    {/* Citations */}
-                    {!isStreaming(msg) && <Citations urls={extractUrls(msg.text)} />}
 
                     {/* Action buttons — only show when not streaming */}
                     {!isStreaming(msg) && msg.text && (

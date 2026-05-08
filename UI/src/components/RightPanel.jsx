@@ -1,6 +1,6 @@
 import { LinkItem } from './Common';
 
-export default function RightPanel({ rightPanelContent }) {
+export default function RightPanel({ rightPanelContent, links = [] }) {
   return (
     <aside className="w-80 bg-white dark:bg-black border border-sjsu-gold p-7 hidden xl:block shrink-0 transition-all duration-300 rounded-2xl m-4">
        {rightPanelContent === 'empty' ? (
@@ -16,8 +16,14 @@ export default function RightPanel({ rightPanelContent }) {
                </h2>
                
                <div className="space-y-0 rounded-lg overflow-hidden border border-border-color bg-bg-main">
-                   <LinkItem label="Link to website" isFirst />
-                   <LinkItem label="Link to document file" />
+                   {links.map((link, index) => (
+                     <LinkItem
+                       key={`${link.url}-${index}`}
+                       label={link.title || link.url}
+                       href={link.url}
+                       isFirst={index === 0}
+                     />
+                   ))}
                </div>
           </div>
        )}

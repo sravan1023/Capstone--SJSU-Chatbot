@@ -18,12 +18,18 @@ export function FollowUpChip({ text }) {
     );
 }
 
-export function LinkItem({ label, isFirst = false }) {
+export function LinkItem({ label, href, isFirst = false }) {
+    const Wrapper = href ? 'a' : 'div';
     return (
-        <div className={`flex items-center justify-between px-4 py-3.5 bg-bg-surface hover:bg-bg-hover transition-colors cursor-pointer group ${!isFirst ? 'border-t border-border-color' : ''}`}>
-            <span className="text-sm underline text-text-primary font-medium group-hover:text-black dark:group-hover:text-white">{label}</span>
+        <Wrapper
+            {...(href ? { href, target: '_blank', rel: 'noreferrer' } : {})}
+            className={`flex items-center justify-between px-4 py-3.5 bg-bg-surface hover:bg-bg-hover transition-colors cursor-pointer group ${!isFirst ? 'border-t border-border-color' : ''}`}
+        >
+            <span className="text-sm underline text-text-primary font-medium group-hover:text-black dark:group-hover:text-white">
+                {label}
+            </span>
             <LinkIcon size={14} className="text-sjsu-gold group-hover:text-black dark:group-hover:text-white" />
-        </div>
+        </Wrapper>
     );
 }
 
@@ -43,19 +49,7 @@ export function SidebarToolItem({ icon, label, active = false, onClick }) {
     );
 }
 
-function timeAgo(dateStr) {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    if (days < 7) return `${days}d ago`;
-    return new Date(dateStr).toLocaleDateString();
-}
-
-export function HistoryItem({ id, title, preview, updatedAt, active, onClick, onRename, onDelete, projects = [], onMoveToProject }) {
+export function HistoryItem({ id, title, preview, active, onClick, onRename, onDelete, projects = [], onMoveToProject }) {
     const [renaming, setRenaming] = useState(false);
     const [renameValue, setRenameValue] = useState(title || '');
     const [showProjectPicker, setShowProjectPicker] = useState(false);

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import JobsDashboardTable from './components/JobsDashboardTable';
-import { fetchInternJobsDashboard, triggerInternJobsPipeline } from './lib/api';
+import { fetchInternJobsDashboard } from './lib/api';
 import type { DashboardPayload } from './types/pipeline';
 
 interface InternJobsAlertsPageProps {
@@ -37,7 +37,6 @@ export default function InternJobsAlertsPage({ onBack }: InternJobsAlertsPagePro
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<(typeof CATEGORY_OPTIONS)[number] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -82,47 +81,32 @@ export default function InternJobsAlertsPage({ onBack }: InternJobsAlertsPagePro
     let mounted = true;
     loadData(() => mounted);
 
+    const interval = setInterval(() => {
+      if (mounted) loadData(() => mounted);
+    }, 10 * 60 * 1000);
+
     return () => {
       mounted = false;
+      clearInterval(interval);
     };
   }, []);
 
-  const handleFetchNow = async () => {
-    setTriggering(true);
-    setError('');
-    setNotice('');
-    try {
-      const result = await triggerInternJobsPipeline();
-      await loadData();
-      if (result.newJobsCount === 0) {
-        setNotice(`No new jobs detected. Showing current Top ${result.topCount} jobs.`);
-      } else {
-        setNotice(`Fetch completed. Showing Top ${result.topCount} jobs.`);
-      }
-    } catch (triggerError) {
-      setError(triggerError instanceof Error ? triggerError.message : 'Failed to trigger pipeline run.');
-    } finally {
-      setTriggering(false);
-    }
-  };
-
   return (
     <section className="flex h-full w-full flex-col bg-bg-main text-text-primary transition-colors duration-300">
-      <div className="border-b border-border-color px-4 py-4 md:px-6">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
+      <div className="border-b border-border-color px-4 py-3 md:px-6">
+        <div className="flex w-full flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-xl font-semibold">Top 100 Intern Jobs</h2>
-            <p className="text-sm text-text-secondary">Latest pipeline snapshot only.</p>
+            <h2 className="text-xl font-semibold">Job Board</h2>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handleFetchNow}
-              disabled={triggering}
-              className="rounded-md bg-sjsu-gold px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-sjsu-gold-hover disabled:opacity-60"
+              onClick={() => loadData()}
+              disabled={loading}
+              className="rounded-md border border-border-color bg-bg-surface px-3 py-2 text-sm text-text-primary transition-colors hover:bg-bg-hover disabled:opacity-50"
             >
-              {triggering ? 'Fetching...' : 'Fetch Now'}
+              {loading ? 'Refreshing…' : 'Refresh'}
             </button>
             <button
               type="button"
@@ -134,39 +118,25 @@ export default function InternJobsAlertsPage({ onBack }: InternJobsAlertsPagePro
           </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-text-secondary">
-              <span>21 Categories</span>
-              <button
-                type="button"
-                onClick={() => setSelectedCategory(null)}
-                className="normal-case text-xs text-text-secondary underline decoration-border-color underline-offset-2 hover:text-text-primary"
-              >
-                Show all
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
+          <div className="flex items-center gap-3">
+            <label htmlFor="category-select" className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Category</label>
+            <select
+              id="category-select"
+              value={selectedCategory ?? ''}
+              onChange={(e) => setSelectedCategory(e.target.value || null)}
+              className="rounded-md border border-border-color bg-bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-bg-hover focus:outline-none focus:ring-1 focus:ring-sjsu-gold"
+            >
+              <option value="">All Categories</option>
               {CATEGORY_OPTIONS.map((category) => (
-                <button
-                  key={category}
-                  type="button"
-                  onClick={() => setSelectedCategory((current) => (current === category ? null : category))}
-                  className={`rounded-full border px-3 py-2 text-left text-sm font-medium transition-colors md:px-4 ${
-                    selectedCategory === category
-                      ? 'border-transparent bg-sjsu-gold text-white shadow-sm'
-                      : 'border-border-color bg-bg-surface text-text-primary hover:bg-bg-hover'
-                  }`}
-                >
-                  {category}
-                </button>
+                <option key={category} value={category}>{category}</option>
               ))}
-            </div>
+            </select>
           </div>
         </div>
       </div>
 
       <div className="flex-1 overflow-auto p-4 md:p-6">
-        <div className="mx-auto w-full max-w-6xl space-y-4">
+        <div className="w-full space-y-3">
           {loading && <div className="text-sm text-text-secondary">Loading top jobs...</div>}
           {!loading && !error && notice && <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</div>}
           {!loading && error && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">{error}</div>}

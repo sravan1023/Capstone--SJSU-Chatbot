@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check } from 'lucide-react';
+import { Check, Sparkles, RotateCcw } from 'lucide-react';
 
 const STYLE_OPTIONS = [
   {
@@ -65,9 +65,23 @@ const PREVIEW_MAP = {
   },
 };
 
-export default function BehaviorSettings({ settings, onUpdate }) {
+/**
+ * BehaviorSettings — style picker with auto-detect awareness.
+ *
+ * Props:
+ *   settings       - current effective settings (auto + manual merged)
+ *   autoBehavior   - auto-detected baseline from backend (null = not loaded yet)
+ *   manualOverrides - fields the user has explicitly set (object with only overridden keys)
+ *   onUpdate       - (updates) => Promise<void>
+ *   onResetField   - (field) => void — reset a single field to auto
+ *   onResetAll     - () => void — reset all fields to auto
+ */
+export default function BehaviorSettings({ settings, autoBehavior, manualOverrides, onUpdate, onResetField, onResetAll }) {
   const [saving, setSaving] = useState(null);
   const [previewField, setPreviewField] = useState(null);
+
+  const overrides = manualOverrides || {};
+  const hasAnyOverride = Object.keys(overrides).length > 0;
 
   const handleSelect = async (field, value) => {
     if (settings?.[field] === value) return;
@@ -92,22 +106,60 @@ export default function BehaviorSettings({ settings, onUpdate }) {
     );
   }
 
-  // Build the preview text based on what was last changed, or default to tone
   const activePreviewField = previewField || 'response_tone';
   const previewText = PREVIEW_MAP[activePreviewField]?.[settings[activePreviewField]] || '';
 
   return (
     <div className="space-y-8">
+      {/* Auto-detect banner */}
+      {autoBehavior && (
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20">
+          <div className="flex items-center gap-2 text-sm text-violet-400">
+            <Sparkles size={14} />
+            <span>Auto-adapted to your conversation</span>
+          </div>
+          {hasAnyOverride && onResetAll && (
+            <button
+              onClick={onResetAll}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-violet-400 hover:bg-violet-500/10 transition-colors"
+            >
+              <RotateCcw size={12} />
+              Reset All to Auto
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Settings rows */}
       <div className="space-y-1">
         {STYLE_OPTIONS.map(({ field, label, options }, idx) => {
           const isSaving = saving === field;
           const selectedValue = settings[field];
+          const isOverridden = field in overrides;
+          const autoValue = autoBehavior?.[field];
 
           return (
             <div key={field}>
               <div className={`flex items-center justify-between py-3.5 transition-opacity ${isSaving ? 'opacity-60' : ''}`}>
-                <span className="text-sm font-medium text-text-primary">{label}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-text-primary">{label}</span>
+                  {isOverridden && (
+                    <button
+                      onClick={() => onResetField?.(field)}
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-violet-400 hover:bg-violet-500/10 transition-colors"
+                      title={`Auto-detected: ${autoValue}. Click to reset.`}
+                    >
+                      <RotateCcw size={10} />
+                      Auto
+                    </button>
+                  )}
+                  {!isOverridden && autoBehavior && (
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-violet-400/60">
+                      <Sparkles size={9} />
+                      Auto
+                    </span>
+                  )}
+                </div>
 
                 {/* Segmented control */}
                 <div className="flex bg-bg-main rounded-lg p-0.5 gap-0.5">

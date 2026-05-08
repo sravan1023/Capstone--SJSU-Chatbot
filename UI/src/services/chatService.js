@@ -91,7 +91,6 @@ export async function fetchMessages({ conversationId, limit = 30, cursor = null 
 
   const { data, error } = await query;
   if (error) throw error;
-  // Reverse so oldest is first (natural chat order)
   return data.reverse();
 }
 
@@ -101,12 +100,15 @@ export async function fetchMessages({ conversationId, limit = 30, cursor = null 
 export async function insertMessage({ conversationId, role, content }) {
   const { data, error } = await supabase
     .from('messages')
-    .insert({ conversation_id: conversationId, role, content })
+    .insert({
+      conversation_id: conversationId,
+      role,
+      content,
+    })
     .select()
     .single();
   if (error) throw error;
 
-  // Update conversation sidebar preview
   const preview = content.length > 80 ? content.slice(0, 80) + '...' : content;
   await supabase
     .from('conversations')

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Globe, FolderOpen, MessageSquare, Check, ChevronDown, Trash2 } from 'lucide-react';
+import { X, Globe, FolderOpen, MessageSquare, Trash2, Sparkles } from 'lucide-react';
 import BehaviorSettings from './BehaviorSettings';
 import PrioritySettings from './PrioritySettings';
 
@@ -10,20 +10,19 @@ const SCOPE_META = {
 };
 
 /**
- * ScopedBehaviorPanel — slide-over panel for configuring behavior at
- * project or conversation level, with a clear scope indicator.
+ * ScopedBehaviorPanel — slide-over for configuring behavior overrides,
+ * now with auto-detect awareness.
  *
  * Props:
- *   open           - boolean, whether the panel is visible
+ *   open           - boolean
  *   onClose        - () => void
  *   scope          - 'project' | 'conversation'
- *   scopeLabel     - display name, e.g. project name or conversation title
+ *   scopeLabel     - display name
  *   scopeId        - the project_id or conversation_id
- *   userId         - current user ID
- *   globalBehavior - user-level behavior settings (fallback display)
- *   scopedBehavior - the override for this scope (null if none set)
- *   onSave         - (updates) => Promise<void>  — upsert scoped behavior
- *   onDelete       - () => Promise<void>          — remove the override
+ *   autoBehavior   - auto-detected baseline from backend
+ *   scopedBehavior - the manual override for this scope (null = no override)
+ *   onSave         - (updates) => Promise<void>
+ *   onDelete       - () => Promise<void>
  */
 export default function ScopedBehaviorPanel({
   open,
@@ -31,39 +30,78 @@ export default function ScopedBehaviorPanel({
   scope,
   scopeLabel,
   scopeId,
-  globalBehavior,
+  autoBehavior,
   scopedBehavior,
   onSave,
   onDelete,
 }) {
-  const [tab, setTab] = useState('style'); // 'style' | 'priorities'
+  const [tab, setTab] = useState('style');
   const [localSettings, setLocalSettings] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const [manualOverrides, setManualOverrides] = useState({});
   const [deleting, setDeleting] = useState(false);
 
   const meta = SCOPE_META[scope] || SCOPE_META.conversation;
   const ScopeIcon = meta.icon;
   const hasOverride = scopedBehavior != null;
 
-  // Sync local state when panel opens or scoped data changes
+  // Sync local state when panel opens
   useEffect(() => {
     if (open) {
-      setLocalSettings(scopedBehavior ? { ...scopedBehavior } : { ...globalBehavior });
+      const base = autoBehavior || {};
+      const manual = scopedBehavior || {};
+
+      // Effective = auto merged with manual overrides
+      const effective = { ...base };
+      const overrideKeys = {};
+      for (const field of ['response_tone', 'response_length', 'response_format', 'emoji_usage', 'priority_stack']) {
+        if (manual[field] != null) {
+          effective[field] = manual[field];
+          overrideKeys[field] = manual[field];
+        }
+      }
+
+      setLocalSettings(effective);
+      setManualOverrides(overrideKeys);
       setTab('style');
     }
-  }, [open, scopeId, scopedBehavior, globalBehavior]);
+  }, [open, scopeId, scopedBehavior, autoBehavior]);
 
   if (!open || !localSettings) return null;
 
   const handleUpdate = async (updates) => {
     const next = { ...localSettings, ...updates };
     setLocalSettings(next);
-    setSaving(true);
-    try {
-      await onSave(updates);
-    } finally {
-      setSaving(false);
+
+    // Track which fields are manual overrides
+    const nextOverrides = { ...manualOverrides, ...updates };
+    setManualOverrides(nextOverrides);
+
+    await onSave(updates);
+  };
+
+  const handleResetField = async (field) => {
+    if (!autoBehavior) return;
+    const autoValue = autoBehavior[field];
+    const next = { ...localSettings, [field]: autoValue };
+    setLocalSettings(next);
+
+    const nextOverrides = { ...manualOverrides };
+    delete nextOverrides[field];
+    setManualOverrides(nextOverrides);
+
+    // If no overrides left, delete the whole scoped behavior row
+    if (Object.keys(nextOverrides).length === 0) {
+      await onDelete();
+    } else {
+      await onSave({ [field]: autoValue });
     }
+  };
+
+  const handleResetAll = async () => {
+    if (!autoBehavior) return;
+    setLocalSettings({ ...autoBehavior });
+    setManualOverrides({});
+    await onDelete();
   };
 
   const handleDelete = async () => {
@@ -75,11 +113,6 @@ export default function ScopedBehaviorPanel({
       setDeleting(false);
     }
   };
-
-  // Determine which scope is actually active for display
-  const activeScope = hasOverride ? scope : 'user';
-  const activeMeta = SCOPE_META[activeScope];
-  const ActiveIcon = activeMeta.icon;
 
   return (
     <>
@@ -111,15 +144,18 @@ export default function ScopedBehaviorPanel({
             <span className="text-text-primary truncate max-w-[200px]">{scopeLabel || 'Untitled'}</span>
           </div>
 
-          {/* Active scope indicator */}
+          {/* Status indicator */}
           <div className="mt-3 flex items-center gap-2 text-xs text-text-secondary">
-            <span>Currently using:</span>
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${activeMeta.bg} ${activeMeta.color} font-medium`}>
-              <ActiveIcon size={10} />
-              {activeMeta.label}
-            </span>
-            {!hasOverride && (
-              <span className="italic">(no override set — using global defaults)</span>
+            {hasOverride ? (
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${meta.bg} ${meta.color} font-medium`}>
+                <ScopeIcon size={10} />
+                Manual override active
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 font-medium">
+                <Sparkles size={10} />
+                Using auto-detected settings
+              </span>
             )}
           </div>
         </div>
@@ -152,18 +188,14 @@ export default function ScopedBehaviorPanel({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-6">
-          {/* Inheritance hint */}
-          {!hasOverride && (
-            <div className="mb-6 px-4 py-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-sm text-text-secondary">
-              No override exists for this {scope === 'project' ? 'project' : 'conversation'} yet.
-              Changing any setting below will create one. Until then, global defaults apply.
-            </div>
-          )}
-
           {tab === 'style' ? (
             <BehaviorSettings
               settings={localSettings}
+              autoBehavior={autoBehavior}
+              manualOverrides={manualOverrides}
               onUpdate={handleUpdate}
+              onResetField={handleResetField}
+              onResetAll={handleResetAll}
             />
           ) : (
             <PrioritySettings
@@ -182,8 +214,8 @@ export default function ScopedBehaviorPanel({
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-red-500 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/40 transition-colors disabled:opacity-50"
             >
               <Trash2 size={14} />
-              {deleting ? 'Removing...' : 'Remove Override'}
-              <span className="text-xs text-text-secondary font-normal ml-1">(revert to {scope === 'conversation' ? 'project or ' : ''}global defaults)</span>
+              {deleting ? 'Removing...' : 'Remove All Overrides'}
+              <span className="text-xs text-text-secondary font-normal ml-1">(revert to auto-detected)</span>
             </button>
           </div>
         )}

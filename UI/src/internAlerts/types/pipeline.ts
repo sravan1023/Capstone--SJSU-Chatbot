@@ -20,6 +20,7 @@ export interface SnapshotJob {
   title: string;
   job_url: string;
   source_record_id: string | null;
+  raw_record: Record<string, unknown> | null;
   created_at: string;
 }
 
